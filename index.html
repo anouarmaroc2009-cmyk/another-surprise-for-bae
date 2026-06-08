@@ -877,194 +877,55 @@ const tracks = [
   { title: "Tayf", artist: "Musique", album: "Tayf" }
 ];
 
-// ========== WEB AUDIO API ENGINE ==========
-let audioCtx = null;
-let deckNodes = { A: null, B: null };
-let playing = { A: false, B: false };
-let currentTrack = { A: 0, B: 1 };
-let gainA = null, gainB = null, masterGain = null;
-let crossfadePos = 0.5;
-let beatTimers = { A: null, B: null };
+// ========== SPOTIFY EMBED CONTROLLER ==========
+let spotifyPlayer = null;
+let spotifyReady = false;
+let spotifyPlaying = false;
 
-function initAudio() {
-  if (audioCtx) return;
-  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  
-  masterGain = audioCtx.createGain();
-  masterGain.gain.value = 0.15;
-  masterGain.connect(audioCtx.destination);
-  
-  gainA = audioCtx.createGain();
-  gainA.gain.value = 1;
-  gainA.connect(masterGain);
-  
-  gainB = audioCtx.createGain();
-  gainB.gain.value = 0;
-  gainB.connect(masterGain);
-  
-  updateCrossfade();
+function getSpotifyIframe() {
+  return document.querySelector('.spotify-embed iframe');
 }
 
-// ===== DECK A - MELODIC LOOP (Arabesque melody) =====
-const melodyNotes = [
-  { freq: 392, dur: 0.2 },  // G4
-  { freq: 440, dur: 0.15 }, // A4
-  { freq: 523, dur: 0.25 }, // C5
-  { freq: 494, dur: 0.15 }, // B4
-  { freq: 440, dur: 0.1 },  // A4
-  { freq: 392, dur: 0.2 },  // G4
-  { freq: 349, dur: 0.15 }, // F4
-  { freq: 330, dur: 0.2 },  // E4
-  { freq: 294, dur: 0.1 },  // D4
-  { freq: 330, dur: 0.1 },  // E4
-  { freq: 349, dur: 0.15 }, // F4
-  { freq: 392, dur: 0.2 },  // G4
-  { freq: 349, dur: 0.1 },  // F4
-  { freq: 330, dur: 0.15 }, // E4
-  { freq: 294, dur: 0.1 },  // D4
-  { freq: 262, dur: 0.2 },  // C4
-  { freq: 294, dur: 0.15 }, // D4
-  { freq: 330, dur: 0.1 },  // E4
-  { freq: 349, dur: 0.2 },  // F4
-  { freq: 392, dur: 0.25 }, // G4
-  { freq: 440, dur: 0.15 }, // A4
-  { freq: 392, dur: 0.1 },  // G4
-  { freq: 349, dur: 0.1 },  // F4
-  { freq: 330, dur: 0.2 },  // E4
-  { freq: 262, dur: 0.2 },  // C4
-  { freq: 330, dur: 0.15 }, // E4
-  { freq: 392, dur: 0.2 },  // G4
-  { freq: 330, dur: 0.1 },  // E4
-  { freq: 294, dur: 0.1 },  // D4
-  { freq: 262, dur: 0.2 }   // C4
-];
-let melodyIndex = 0;
-let lastMelodyTime = 0;
-
-function playMelodyNote() {
-  if (!playing.A || !audioCtx) return;
-  
-  const now = audioCtx.currentTime;
-  const note = melodyNotes[melodyIndex];
-  
-  const osc = audioCtx.createOscillator();
-  const env = audioCtx.createGain();
-  
-  osc.type = 'sine';
-  osc.frequency.value = note.freq;
-  env.gain.setValueAtTime(0.3, now);
-  env.gain.exponentialRampToValueAtTime(0.001, now + note.dur);
-  
-  osc.connect(env);
-  env.connect(gainA);
-  
-  osc.start(now);
-  osc.stop(now + note.dur);
-  
-  melodyIndex = (melodyIndex + 1) % melodyNotes.length;
-  
-  const nextDelay = note.dur * 1000 * 0.9 + Math.random() * 20;
-  beatTimers.A = setTimeout(playMelodyNote, nextDelay);
+function sendSpotifyCommand(cmd) {
+  const iframe = getSpotifyIframe();
+  if (!iframe) return;
+  iframe.contentWindow.postMessage(cmd, 'https://open.spotify.com');
 }
 
-// ===== DECK B - RHYTHM/PERCUSSION LOOP =====
-function playKick() {
-  if (!audioCtx) return;
-  const now = audioCtx.currentTime;
-  const osc = audioCtx.createOscillator();
-  const env = audioCtx.createGain();
-  osc.type = 'sine';
-  osc.frequency.setValueAtTime(150, now);
-  osc.frequency.exponentialRampToValueAtTime(40, now + 0.08);
-  env.gain.setValueAtTime(0.5, now);
-  env.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
-  osc.connect(env);
-  env.connect(gainB);
-  osc.start(now);
-  osc.stop(now + 0.12);
+function spotifyPlay() {
+  sendSpotifyCommand({ command: 'play' });
+  spotifyPlaying = true;
 }
 
-function playSnare() {
-  if (!audioCtx) return;
-  const now = audioCtx.currentTime;
-  const bufferSize = audioCtx.sampleRate * 0.08;
-  const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
-  const data = buffer.getChannelData(0);
-  for (let i = 0; i < bufferSize; i++) {
-    data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bufferSize * 0.15));
-  }
-  const noise = audioCtx.createBufferSource();
-  noise.buffer = buffer;
-  const env = audioCtx.createGain();
-  env.gain.setValueAtTime(0.25, now);
-  env.gain.exponentialRampToValueAtTime(0.001, now + 0.06);
-  const filter = audioCtx.createBiquadFilter();
-  filter.type = 'highpass';
-  filter.frequency.value = 1000;
-  noise.connect(filter);
-  filter.connect(env);
-  env.connect(gainB);
-  noise.start(now);
-  noise.stop(now + 0.06);
+function spotifyPause() {
+  sendSpotifyCommand({ command: 'pause' });
+  spotifyPlaying = false;
 }
 
-function playHihat() {
-  if (!audioCtx) return;
-  const now = audioCtx.currentTime;
-  const bufferSize = audioCtx.sampleRate * 0.04;
-  const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
-  const data = buffer.getChannelData(0);
-  for (let i = 0; i < bufferSize; i++) {
-    data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bufferSize * 0.1));
-  }
-  const noise = audioCtx.createBufferSource();
-  noise.buffer = buffer;
-  const env = audioCtx.createGain();
-  env.gain.setValueAtTime(0.12, now);
-  env.gain.exponentialRampToValueAtTime(0.001, now + 0.03);
-  const filter = audioCtx.createBiquadFilter();
-  filter.type = 'highpass';
-  filter.frequency.value = 5000;
-  noise.connect(filter);
-  filter.connect(env);
-  env.connect(gainB);
-  noise.start(now);
-  noise.stop(now + 0.03);
+function spotifyNext() {
+  sendSpotifyCommand({ command: 'next' });
 }
 
-let beatStep = 0;
-function playBeat() {
-  if (!playing.B || !audioCtx) return;
-  
-  const pattern = [
-    { kick: true, snare: false, hihat: true },
-    { kick: false, snare: false, hihat: true },
-    { kick: true, snare: false, hihat: true },
-    { kick: false, snare: true, hihat: true },
-    { kick: true, snare: false, hihat: true },
-    { kick: false, snare: false, hihat: false },
-    { kick: true, snare: false, hihat: true },
-    { kick: false, snare: true, hihat: true }
-  ];
-  
-  const step = pattern[beatStep % pattern.length];
-  if (step.kick) playKick();
-  if (step.snare) playSnare();
-  if (step.hihat) playHihat();
-  
-  beatStep++;
-  beatTimers.B = setTimeout(playBeat, 150);
+function spotifyPrev() {
+  sendSpotifyCommand({ command: 'previous' });
 }
 
-// ===== CROSSFADER =====
-function updateCrossfade() {
-  if (!gainA || !gainB) return;
-  const pos = crossfadePos;
-  gainA.gain.value = Math.cos(pos * Math.PI / 2);
-  gainB.gain.value = Math.sin(pos * Math.PI / 2);
-}
+// Listen for Spotify embed events
+window.addEventListener('message', (e) => {
+  if (e.origin !== 'https://open.spotify.com') return;
+  try {
+    const data = typeof e.data === 'string' ? JSON.parse(e.data) : e.data;
+    if (data.type === 'playback_update' || data.type === 'ready') {
+      spotifyReady = true;
+      if (data.payload && data.payload.isPaused !== undefined) {
+        spotifyPlaying = !data.payload.isPaused;
+      }
+    }
+  } catch (_) {}
+});
 
-// ===== VISUALIZER =====
+// ===== VISUALIZER + DECK SYNC =====
+let vizInterval = null;
 function animateVisualizer(deck) {
   const container = deck === 'A' ? 'vizL' : 'vizR';
   const bars = document.querySelectorAll(`#${container} .bar`);
@@ -1077,7 +938,27 @@ function animateVisualizer(deck) {
   });
 }
 
+function startVizLoop() {
+  if (vizInterval) return;
+  vizInterval = setInterval(() => {
+    if (spotifyPlaying) {
+      animateVisualizer('A');
+      animateVisualizer('B');
+    }
+  }, 400);
+}
+
+function stopVizLoop() {
+  if (vizInterval) {
+    clearInterval(vizInterval);
+    vizInterval = null;
+  }
+}
+
 // ===== DJ CONTROLS =====
+let playing = { A: false, B: false };
+let currentTrack = { A: 0, B: 1 };
+
 function populateTrackList() {
   const list = document.getElementById('trackList');
   list.innerHTML = '';
@@ -1114,43 +995,38 @@ function updateDeck(deck) {
 }
 
 function togglePlay(deck) {
-  initAudio();
-  if (audioCtx.state === 'suspended') audioCtx.resume();
-  
-  playing[deck] = !playing[deck];
-  const btn = document.getElementById(`play${deck}`);
-  const platter = document.getElementById(deck === 'A' ? 'platterL' : 'platterR');
-  
-  if (playing[deck]) {
-    btn.textContent = '\u23F8';
-    btn.classList.add('playing');
-    platter.classList.add('spinning');
-    animateVisualizer(deck);
-    if (deck === 'A') {
-      melodyIndex = 0;
-      beatTimers.A = setTimeout(playMelodyNote, 50);
-    } else {
-      beatStep = 0;
-      beatTimers.B = setTimeout(playBeat, 50);
-    }
+  if (spotifyPlaying) {
+    spotifyPause();
+    playing.A = false;
+    playing.B = false;
   } else {
-    btn.textContent = '\u25B6';
-    btn.classList.remove('playing');
-    platter.classList.remove('spinning');
-    if (deck === 'A') {
-      clearTimeout(beatTimers.A);
-    } else {
-      clearTimeout(beatTimers.B);
-    }
+    spotifyPlay();
+    playing.A = true;
+    playing.B = true;
   }
+  
+  const btns = [document.getElementById('playA'), document.getElementById('playB')];
+  const platters = [document.getElementById('platterL'), document.getElementById('platterR')];
+  const isPlay = spotifyPlaying;
+  
+  btns.forEach(btn => {
+    btn.textContent = isPlay ? '\u23F8' : '\u25B6';
+    btn.classList.toggle('playing', isPlay);
+  });
+  platters.forEach(p => p.classList.toggle('spinning', isPlay));
+  
+  if (isPlay) startVizLoop();
+  else stopVizLoop();
 }
 
 function nextTrack(deck) {
+  spotifyNext();
   currentTrack[deck] = (currentTrack[deck] + 1) % tracks.length;
   updateDeck(deck);
 }
 
 function prevTrack(deck) {
+  spotifyPrev();
   currentTrack[deck] = (currentTrack[deck] - 1 + tracks.length) % tracks.length;
   updateDeck(deck);
 }
@@ -1158,10 +1034,15 @@ function prevTrack(deck) {
 function selectTrack(index) {
   currentTrack.A = index;
   updateDeck('A');
-  if (!playing.A) togglePlay('A');
+  if (spotifyPlaying) {
+    spotifyPause();
+    spotifyPlay();
+  } else {
+    togglePlay('A');
+  }
 }
 
-// Crossfader interaction
+// ===== CROSSFADER =====
 let isDragging = false;
 const knob = document.getElementById('crossfaderKnob');
 const xfadeContainer = document.getElementById('crossfaderContainer');
@@ -1177,19 +1058,16 @@ document.addEventListener('mousemove', (e) => {
   let pos = (e.clientY - rect.top) / rect.height;
   pos = Math.max(0, Math.min(1, pos));
   knob.style.top = `${pos * 100}%`;
-  crossfadePos = 1 - pos;
-  updateCrossfade();
 });
 
 document.addEventListener('mouseup', () => {
   isDragging = false;
 });
 
-// Stars background
+// ===== STARS =====
 function createStars() {
   const el = document.getElementById('stars');
-  const count = 150;
-  for (let i = 0; i < count; i++) {
+  for (let i = 0; i < 150; i++) {
     const star = document.createElement('div');
     const size = Math.random() * 3 + 1;
     star.style.cssText = `
@@ -1207,17 +1085,17 @@ function createStars() {
   }
 }
 
-const style = document.createElement('style');
-style.textContent = `
+const twinkleStyle = document.createElement('style');
+twinkleStyle.textContent = `
   @keyframes twinkle {
     0%, 100% { opacity: 0.2; transform: scale(1); }
     50% { opacity: 1; transform: scale(1.5); }
   }
 `;
-document.head.appendChild(style);
+document.head.appendChild(twinkleStyle);
 createStars();
 
-// Confetti
+// ===== CONFETTI =====
 function startConfetti() {
   const canvas = document.getElementById('confetti-canvas');
   const ctx = canvas.getContext('2d');
@@ -1239,7 +1117,6 @@ function startConfetti() {
   }));
   
   let frame = 0;
-  
   function animate() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     let alive = false;
@@ -1258,9 +1135,7 @@ function startConfetti() {
       ctx.restore();
     });
     frame++;
-    if (alive && frame < 300) {
-      requestAnimationFrame(animate);
-    }
+    if (alive && frame < 300) requestAnimationFrame(animate);
   }
   animate();
 }
@@ -1271,16 +1146,11 @@ window.addEventListener('resize', () => {
   canvas.height = window.innerHeight;
 });
 
-// Init
+// ===== INIT =====
 populateTrackList();
 updateDeck('A');
 updateDeck('B');
 startConfetti();
-
-setInterval(() => {
-  if (playing.A) animateVisualizer('A');
-  if (playing.B) animateVisualizer('B');
-}, 600);
 </script>
 </body>
 </html>
